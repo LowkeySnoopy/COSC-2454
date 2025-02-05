@@ -1,138 +1,214 @@
-import java.awt.Image;
-import javax.swing.JPanel;
+// Lanard Johnson
+//Advanced Data Structures COSC-2454
+//Dr.Zaki
+// 2/3/2025
+// Falling Sanding
+/* This Java program simulates a falling sand physics simulation using double buffering for smooth rendering.
+It features sand particles that fall downward if space is available or sliding diagonally if blocked.
+Users can interact with the simulation using the mouse—left-click to add sand, right-click to remove it,
+and drag to modify multiple cells. Keyboard controls allow clearing the grid ("R") which stands for reset,
+disabling physics ("D") which allows the user to draw, and re-enabling the falling physics by clicking ("F") which stands for falling.
+The program continuously updates in a game loop, processing user input, updating sand positions, and repainting the display to reflect changes.
+ */
+
+
 import java.awt.Graphics;
 import java.awt.Color;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseMotionListener;
+import java.awt.Dimension;
 import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionListener;
+import java.awt.event.MouseEvent;
+import java.awt.Image;
+import java.awt.event.KeyListener;
+import java.awt.event.KeyEvent;
+import javax.swing.JPanel;
 
-public class FallingSandDoubleBuffering extends JPanel implements MouseListener, MouseMotionListener {
+public class FallingSandDoubleBuffering extends JPanel implements MouseListener, MouseMotionListener, KeyListener, Runnable {
 
-    // Dimensions of the canvas
-    private final int WIDTH = 640; // Width of the canvas in pixels
-    private final int HEIGHT = 240; // Height of the canvas in pixels
-    private final int SIZE = 2; // Size of each sand particle (square)
-    private final boolean[][] SAND = new boolean[HEIGHT][WIDTH];
+    // Panel dimensions
+    private final int WIDTH = 640;
+    private final int HEIGHT = 240;
+    private final int SIZE = 2;
 
-    private boolean active = false; // Tracks whether the mouse is actively pressing down
-    private int x, y; // Current mouse position (x, y)
+    // Sand grid (each cell is true if there is sand, false if empty)
+    private final boolean[][] sand = new boolean[HEIGHT][WIDTH];
+    private boolean active = false;
 
-    public Image offscrean;
+    private int x;
+    private int y;
+
+    // Create an offscreen image for double buffering
+    public Image offscreen;
+
+    // Get a graphics object to draw onto the offscreen image
     public Graphics og;
 
-    // Constructor to initialize the canvas and register mouse listeners
+    // Flag to control whether falling physics are enabled or not
+    private boolean fallingEnabled = true;
+
+    // Constructor: Set up the panel
     public FallingSandDoubleBuffering() {
-        this.setSize(WIDTH, HEIGHT);
-
-        // Add listeners for mouse events
-        this.addMouseListener(this);
-        this.addMouseMotionListener(this);
+        setPreferredSize(new Dimension(WIDTH, HEIGHT));
+        addMouseListener(this);  // Register mouse listener
+        addMouseMotionListener(this);  // Register mouse motion listener
+        addKeyListener(this);  // Register key listener
+        setFocusable(true);  // Make sure the panel is focusable
+        requestFocusInWindow();  // Request focus to receive key events
     }
 
-    // Called whenever the mouse is pressed
+    private int mouseButton = -1;
+
+    // Mouse event handling: for adding/removing sand
     public void mousePressed(MouseEvent e) {
-        this.x = e.getX(); // Get x-coordinate of mouse
-        this.y = e.getY(); // Get y-coordinate of mouse
-        this.active = true; // Mark the mouse as active
+        this.x = e.getX();
+        this.y = e.getY();
+        this.active = true;
+        this.mouseButton = e.getButton();
     }
 
-    // Called whenever the mouse is dragged (while holding down)
+    // Mouse drag event handling: update sand based on mouse actions
     public void mouseDragged(MouseEvent e) {
-        this.x = e.getX(); // Update x-coordinate
-        this.y = e.getY(); // Update y-coordinate
+        this.x = e.getX();
+        this.y = e.getY();
+
+        if (this.mouseButton == MouseEvent.BUTTON1) { // Left-click: Add sand
+            if (this.y >= 0 && this.y < HEIGHT && this.x >= 0 && this.x < WIDTH) {
+                this.sand[this.y][this.x] = true;
+            }
+        } else if (this.mouseButton == MouseEvent.BUTTON3) { // Right-click: Remove sand
+            if (this.y >= 0 && this.y < HEIGHT && this.x >= 0 && this.x < WIDTH) {
+                this.sand[this.y][this.x] = false;
+            }
+        }
     }
 
-    // Called whenever the mouse button is released
     public void mouseReleased(MouseEvent e) {
-        this.active = false; // Deactivate mouse
+        this.active = false;
+        this.mouseButton = -1;
     }
 
-    // Unused mouse event methods
-    public void mouseClicked(MouseEvent e) {
+    // Other unused mouse events
+    public void mouseClicked(MouseEvent e) {}
+    public void mouseExited(MouseEvent e) {}
+    public void mouseEntered(MouseEvent e) {}
+    public void mouseMoved(MouseEvent e) {}
+
+    // Key event handling: for clearing sand and toggling physics
+    public void keyPressed(KeyEvent e) {
+        if (e.getKeyCode() == KeyEvent.VK_R) {
+            // Clear sand when "R" is pressed
+            clearSand();
+        }
+        if (e.getKeyCode() == KeyEvent.VK_D) {
+            // Disable falling physics when "D" is pressed
+            fallingEnabled = false;
+        }
+        if (e.getKeyCode() == KeyEvent.VK_F) {
+            // Enable falling physics when "F" is pressed
+            fallingEnabled = true;
+        }
     }
 
-    public void mouseExited(MouseEvent e) {
+    public void keyReleased(KeyEvent e) {}
+    public void keyTyped(KeyEvent e) {}
+
+    // Method to clear all sand (reset grid to false)
+    private void clearSand() {
+        for (int r = 0; r < HEIGHT; r++) {
+            for (int c = 0; c < WIDTH; c++) {
+                sand[r][c] = false;
+            }
+        }
     }
 
-    public void mouseEntered(MouseEvent e) {
-    }
-
-    public void mouseMoved(MouseEvent e) {
-    }
-
-    // Graphics rendering method
+    // Method to draw the sand and background
     public void paint(Graphics g) {
-        g.drawImage(offscrean, 0, 0, this);
+        g.drawImage(offscreen, 0, 0, this);
     }
 
+    // Method to handle the drawing logic of the sand particles
     public void draw() {
-        offscrean = createImage(this.WIDTH, this.HEIGHT);
-        og = offscrean.getGraphics();
+        // Create an offscreen image for double buffering
+        offscreen = createImage(this.WIDTH, this.HEIGHT);
+        og = offscreen.getGraphics();
 
+        // Fill the background with dark gray color
         og.setColor(Color.DARK_GRAY);
         og.fillRect(0, 0, this.WIDTH, this.HEIGHT);
 
-        // Draw the sand particles
+        // Draw each sand particle
         for (int r = 0; r < this.HEIGHT; r++) {
             for (int c = 0; c < this.WIDTH; c++) {
-                if (this.SAND[r][c]) {
-
-                    float red = 0.5f;
-                    float green = c / (float) this.WIDTH;
-                    float blue = r / (float) this.HEIGHT;
-                    og.setColor(new Color(red, green, blue));
-
-                    og.fillRect(c, r, this.SIZE, this.SIZE); // Draw a particle
+                if (this.sand[r][c]) {
+                    // Calculate color based on position for some variation
+                    float red = c / (float) this.WIDTH;
+                    float green = r / (float) this.HEIGHT;
+                    float yellow = .5f;
+                    og.setColor(new Color(red, green, yellow));
+                    og.fillRect(c, r, this.SIZE, this.SIZE);
                 }
             }
         }
     }
 
-            // Main game loop for simulating sand behavior
-            public void run () {
-                boolean running = true; // Control flag for the simulation
-                while (running) {
+    // The main game loop: runs continuously and handles the physics and drawing
+    public void run() {
+        boolean running = true;
+        while (running) {
+            try {
+                Thread.sleep(1);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
 
-                    try {
-                        Thread.sleep(1); // Add a slight delay for smooth animation
-                    } catch (Exception e) {
-                        e.printStackTrace();
+            // Add or remove sand while the mouse button is pressed
+            if (this.active) {
+                if (this.mouseButton == MouseEvent.BUTTON1) { // Left-click: Add sand
+                    if (this.y >= 0 && this.y < HEIGHT && this.x >= 0 && this.x < WIDTH) {
+                        this.sand[this.y][this.x] = true;
                     }
-
-                    // Add sand particles where the mouse is pressed
-                    if (this.active) {
-                        this.SAND[this.y][this.x] = true;
+                } else if (this.mouseButton == MouseEvent.BUTTON3) { // Right-click: Remove sand
+                    if (this.y >= 0 && this.y < HEIGHT && this.x >= 0 && this.x < WIDTH) {
+                        this.sand[this.y][this.x] = false;
                     }
-
-                    // Simulate sand falling down
-                    for (int r = this.HEIGHT - 2; r >= 0; r--) { // Start from the second-to-last row
-                        for (int c = 1; c < this.WIDTH - 1; c++) { // Skip the edges
-
-                            // If there is no sand at the current point, skip it
-                            if (!this.SAND[r][c]) {
-                                continue;
-                            }
-
-                            // Check if the space below is empty
-                            if (!this.SAND[r + 1][c]) {
-                                this.SAND[r][c] = false; // Remove sand from current position
-                                this.SAND[r + 1][c] = true; // Move sand one row down
-                            }
-                            // Check if the bottom-left diagonal is empty
-                            else if (!this.SAND[r + 1][c - 1]) {
-                                this.SAND[r][c] = false;
-                                this.SAND[r + 1][c - 1] = true;
-                            }
-                            // Check if the bottom-right diagonal is empty
-                            else if (!this.SAND[r + 1][c + 1]) {
-                                this.SAND[r][c] = false;
-                                this.SAND[r + 1][c + 1] = true;
-                            }
-                        }
-                    }
-
-                    draw();
-                    repaint();
                 }
             }
+
+            // Falling Physics (only if fallingEnabled is true)
+            if (fallingEnabled) {
+                // Loop through the sand particles starting from the bottom
+                for (int r = HEIGHT - 2; r >= 0; r--) {
+                    for (int c = 1; c < WIDTH - 1; c++) {
+
+                        // Skip if no sand in this position
+                        if (!this.sand[r][c]) {
+                            continue;
+                        }
+
+                        // Try to move down
+                        if (!this.sand[r + 1][c]) {
+                            this.sand[r][c] = false;
+                            this.sand[r + 1][c] = true;
+                        }
+
+                        // Try to move down-left
+                        else if (!this.sand[r + 1][c - 1]) {
+                            this.sand[r][c] = false;
+                            this.sand[r + 1][c - 1] = true;
+                        }
+
+                        // Try to move down-right
+                        else if (!this.sand[r + 1][c + 1]) {
+                            this.sand[r][c] = false;
+                            this.sand[r + 1][c + 1] = true;
+                        }
+                    }
+                }
+            }
+
+            // Draw the updated state of the sand
+            draw();
+            repaint();
         }
+    }
+}

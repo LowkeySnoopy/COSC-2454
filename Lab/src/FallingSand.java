@@ -32,6 +32,7 @@ public class FallingSand extends Canvas implements MouseListener, MouseMotionLis
         this.x = e.getX(); // Get x-coordinate of mouse
         this.y = e.getY(); // Get y-coordinate of mouse
         this.active = true; // Mark the mouse as active
+
     }
 
     // Called whenever the mouse is dragged (while holding down)
