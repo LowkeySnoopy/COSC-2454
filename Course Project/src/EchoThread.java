@@ -1,69 +1,145 @@
-import java.lang.Thread;            // We will extend Java's base Thread class
+import java.lang.Thread;
 import java.net.Socket;
-import java.io.ObjectInputStream;   // For reading Java objects off of the wire
-import java.io.ObjectOutputStream;  // For writing Java objects to the wire
-
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.List;
 
 /**
- * Marian Zaki (COSC 2454)
- * A simple server thread.  This class just echoes the messages sent
- * over the socket until the socket is closed.
- *
+ * EchoThread handles communication with one client or peer server.
+ * It supports distributed updates, logging, commit/rollback, and log viewing.
  */
-public class EchoThread extends Thread
-{
-    private final Socket socket;                   // The socket that we'll be talking over
+public class EchoThread extends Thread {
 
-    /**
-     * Constructor that sets up the socket we'll chat over
-     *
-     * @param socket The socket passed in from the server
-     *
-     */
-    public EchoThread(Socket socket)
-    {
-	this.socket = socket;
-    }
+	private final Socket socket;
+	private final DistributedLinkedList distributedList;
+	private final List<ServerInfo> peerServers;
 
-    /**
-     * run() is basically the main method of a thread.  This thread
-     * simply reads Message objects off of the socket.
-     *
-     */
-    public void run()
-    {
-	try{
-	    // Print incoming message
-	    System.out.println("** New connection from " + socket.getInetAddress() + ":" 
-                    + socket.getPort() + " **");
-
-	    // set up I/O streams with the client
-	    final ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
-	    final ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());
-
-	    // Loop to read messages
-	    Message msg = null;
-	    int count = 0;
-	    do{
-		// read and print message
-		msg = (Message)input.readObject();
-		System.out.println("[" + socket.getInetAddress() + ":" + socket.getPort() + "] " + msg.theMessage);
-
-		// Write an ACK back to the sender
-		count++;
-		output.writeObject(new Message("Recieved message #" + count));               
-	    }while(!msg.theMessage.toUpperCase().equals("EXIT"));
-
-	    // Close and cleanup
-	    System.out.println("** Closing connection with " + socket.getInetAddress() + ":" + socket.getPort() + " **");
-	    socket.close();
-
-	}
-	catch(Exception e){
-	    System.err.println("Error: " + e.getMessage());
-	    e.printStackTrace(System.err);
+	public EchoThread(Socket socket) {
+		this(socket, null);
 	}
 
-    }  //-- end run()
+	public EchoThread(Socket socket, List<ServerInfo> peerServers) {
+		this.socket = socket;
+		this.peerServers = peerServers;
+		this.distributedList = new DistributedLinkedList();
+	}
 
-} //-- end class EchoThread
+	@Override
+	public void run() {
+		try {
+			System.out.println("Connection from " + socket.getInetAddress() + ":" + socket.getPort());
+
+			ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+			ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());
+
+			Message msg;
+			boolean isRunning = true;
+
+			while (isRunning) {
+				msg = (Message) input.readObject();
+
+				boolean isClient = !msg.fromServer;
+				String operation = msg.operation.toUpperCase();
+				String value = msg.value;
+
+				System.out.println("[" + socket.getInetAddress() + "] Operation: " + operation + ", Value: " + value);
+
+				String response;
+
+				switch (operation) {
+					case "ADD":
+						distributedList.add(value);
+						response = "Added '" + value + "'";
+						LogWriter.logUpdate(socket.getInetAddress(), operation, value, !isClient);
+						if (isClient) broadcastToPeers(msg);
+						break;
+
+					case "DELETE":
+						if (distributedList.delete(value)) {
+							response = "Deleted '" + value + "'";
+						} else {
+							response = "Item '" + value + "' not found";
+						}
+						LogWriter.logUpdate(socket.getInetAddress(), operation, value, !isClient);
+						if (isClient) broadcastToPeers(msg);
+						break;
+
+					case "VIEW":
+						response = "Current list: " + distributedList.toString();
+						break;
+
+					case "COMMIT":
+						boolean committed = DiskManager.commit(distributedList.getData());
+						response = committed ? "List committed to disk." : "Commit failed.";
+						break;
+
+					case "ROLLBACK":
+						List<String> rolledBack = DiskManager.rollback();
+						if (rolledBack != null) {
+							distributedList.setData(rolledBack);
+							response = "List rolled back to last committed version.";
+						} else {
+							response = "Rollback failed or no previous version exists.";
+						}
+						break;
+
+					case "LOG":
+						response = readLogFile(value.trim().toLowerCase());
+						break;
+
+					case "EXIT":
+						response = "Goodbye.";
+						isRunning = false;
+						break;
+
+					default:
+						response = "Unknown operation: " + operation;
+				}
+
+				output.writeObject(new Message("SERVER", response));
+			}
+
+			System.out.println("Connection closed from " + socket.getInetAddress());
+			socket.close();
+
+		} catch (Exception e) {
+			System.err.println("Thread error: " + e.getMessage());
+			e.printStackTrace();
+		}
+	}
+
+	private void broadcastToPeers(Message msg) {
+		if (peerServers == null || peerServers.isEmpty()) return;
+		msg.fromServer = true;
+		ServerUpdateSender sender = new ServerUpdateSender(peerServers);
+		sender.broadcastUpdate(msg);
+	}
+
+	private String readLogFile(String type) {
+		String filename;
+
+		switch (type) {
+			case "client":
+				filename = "client_updates.log";
+				break;
+			case "server":
+				filename = "server_updates.log";
+				break;
+			default:
+				return "Usage: LOG client OR LOG server";
+		}
+
+		try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+			StringBuilder content = new StringBuilder();
+			String line;
+			while ((line = reader.readLine()) != null) {
+				content.append(line).append("\n");
+			}
+			return content.length() == 0 ? "Log is empty." : content.toString();
+		} catch (Exception e) {
+			return "Unable to read log file: " + e.getMessage();
+		}
+	}
+}
