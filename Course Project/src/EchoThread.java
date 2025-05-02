@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * EchoThread handles communication with one client or peer server.
- * It supports distributed updates, logging, commit/rollback, and log viewing.
+ * It supports distributed updates, logging, insert, commit/rollback, and SYNC.
  */
 public class EchoThread extends Thread {
 
@@ -17,13 +17,17 @@ public class EchoThread extends Thread {
 	private final List<ServerInfo> peerServers;
 
 	public EchoThread(Socket socket) {
-		this(socket, null);
+		this(socket, null, new DistributedLinkedList());
 	}
 
 	public EchoThread(Socket socket, List<ServerInfo> peerServers) {
+		this(socket, peerServers, new DistributedLinkedList());
+	}
+
+	public EchoThread(Socket socket, List<ServerInfo> peerServers, DistributedLinkedList sharedList) {
 		this.socket = socket;
 		this.peerServers = peerServers;
-		this.distributedList = new DistributedLinkedList();
+		this.distributedList = sharedList;
 	}
 
 	@Override
@@ -34,26 +38,64 @@ public class EchoThread extends Thread {
 			ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
 			ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());
 
-			Message msg;
+			Message msg = (Message) input.readObject();
+			String operation = msg.operation.toUpperCase();
+			String value = msg.value;
+
+			// Handle SYNC (one-shot)
+			if (operation.equals("SYNC")) {
+				String response = distributedList.toString();
+				output.writeObject(new Message("SERVER", response));
+				System.out.println("SYNC served to " + socket.getInetAddress());
+				socket.close();
+				return;
+			}
+
+			// Handle Server-to-Server one-shot broadcast
+			if (msg.fromServer) {
+				String response = "";
+
+				switch (operation) {
+					case "ADD":
+						distributedList.add(value);
+						response = "Peer ADD: " + value;
+						break;
+					case "DELETE":
+						distributedList.delete(value);
+						response = "Peer DELETE: " + value;
+						break;
+					case "INSERT":
+						try {
+							String[] parts = value.split(",", 2);
+							int index = Integer.parseInt(parts[0].trim());
+							String item = parts[1].trim();
+							distributedList.insert(index, item);
+							response = "Peer INSERT at " + index + ": " + item;
+						} catch (Exception e) {
+							response = "Invalid INSERT format.";
+						}
+						break;
+					default:
+						response = "Unknown peer operation.";
+				}
+
+				output.writeObject(new Message("SERVER", response));
+				socket.close();
+				return;
+			}
+
+			// Client Session (loop)
 			boolean isRunning = true;
-
 			while (isRunning) {
-				msg = (Message) input.readObject();
-
-				boolean isClient = !msg.fromServer;
-				String operation = msg.operation.toUpperCase();
-				String value = msg.value;
-
 				System.out.println("[" + socket.getInetAddress() + "] Operation: " + operation + ", Value: " + value);
-
 				String response;
 
 				switch (operation) {
 					case "ADD":
 						distributedList.add(value);
 						response = "Added '" + value + "'";
-						LogWriter.logUpdate(socket.getInetAddress(), operation, value, !isClient);
-						if (isClient) broadcastToPeers(msg);
+						LogWriter.logUpdate(socket.getInetAddress(), operation, value, true);
+						broadcastToPeers(msg);
 						break;
 
 					case "DELETE":
@@ -62,8 +104,25 @@ public class EchoThread extends Thread {
 						} else {
 							response = "Item '" + value + "' not found";
 						}
-						LogWriter.logUpdate(socket.getInetAddress(), operation, value, !isClient);
-						if (isClient) broadcastToPeers(msg);
+						LogWriter.logUpdate(socket.getInetAddress(), operation, value, true);
+						broadcastToPeers(msg);
+						break;
+
+					case "INSERT":
+						try {
+							String[] parts = value.split(",", 2);
+							int index = Integer.parseInt(parts[0].trim());
+							String item = parts[1].trim();
+							if (distributedList.insert(index, item)) {
+								response = "Inserted '" + item + "' at index " + index;
+								LogWriter.logUpdate(socket.getInetAddress(), operation, value, true);
+								broadcastToPeers(msg);
+							} else {
+								response = "Insert failed: index out of bounds.";
+							}
+						} catch (Exception e) {
+							response = "Invalid INSERT format. Use: INSERT index,value";
+						}
 						break;
 
 					case "VIEW":
@@ -99,6 +158,12 @@ public class EchoThread extends Thread {
 				}
 
 				output.writeObject(new Message("SERVER", response));
+
+				if (isRunning) {
+					msg = (Message) input.readObject();
+					operation = msg.operation.toUpperCase();
+					value = msg.value;
+				}
 			}
 
 			System.out.println("Connection closed from " + socket.getInetAddress());
