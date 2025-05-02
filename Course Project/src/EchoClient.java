@@ -6,7 +6,7 @@ import java.io.InputStreamReader;
 
 /**
  * EchoClient for interacting with a distributed server.
- * Supports ADD, DELETE, VIEW, COMMIT, ROLLBACK, LOG, and EXIT commands.
+ * Supports ADD, DELETE, INSERT, VIEW, COMMIT, ROLLBACK, LOG, and EXIT commands.
  *
  * COSC 2454 – DDS Project
  */

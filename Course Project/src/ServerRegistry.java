@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Loads peer server info manually from a JSON config file without using Gson.
+ * Loads peer server info manually from a JSON config file.
  *
  * Format example:
  * [
